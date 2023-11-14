@@ -16,12 +16,12 @@
       {
         "command": "code-gpt.setOpenAIKey",
         "category": "CodeGPT",
-        "title": "Set code-gpt openAI key"
+        "title": "Set Code-GPT OpenAI Key"
       },
       {
         "command": "code-gpt.clearGPTMessages",
         "category": "CodeGPT",
-        "title": "Clear CodeGPT messages",
+        "title": "Clear CodeGPT Messages",
         "icon": "$(clear-all)"
       }
     ],
