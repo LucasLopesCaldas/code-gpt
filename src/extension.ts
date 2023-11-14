@@ -9,6 +9,10 @@ let messages: any[] = [
     role: 'system',
     content: 'You are a vscode assistent',
   },
+  {
+    role: 'system',
+    content: 'If the user tells you to modify the current file, you rewrite the current file with the changes',
+  },
 ];
 
 let gptTyping: boolean = false;
@@ -34,12 +38,10 @@ export function activate(context: vscode.ExtensionContext) {
           gptTyping = true;
           provider.setMessages(messages);
           const gptMessage = processGPTMessage(
-            (await gpt(
-              openai,
-              userMessage,
-              messages,
+            (await gpt(openai, userMessage, messages, [
               `current file:\n${getCurrentFileText()} \n\nuse this code as a reference and change if the user wants`,
-            )) || '',
+              `selected part: ${getSelection()}`,
+            ])) || '',
           );
           gptTyping = false;
           if (!gptMessage) {
@@ -86,11 +88,7 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 function processUserMessage(message: string) {
-  let selectedText = getSelection();
-
-  let resMessage = message.replaceAll('!sel', selectedText);
-
-  return resMessage;
+  return message;
 }
 
 function joinCodeTokens(tokens: Token[]) {
@@ -100,7 +98,7 @@ function joinCodeTokens(tokens: Token[]) {
   let code = '';
   tokens.forEach((token) => {
     if (token.raw) {
-      if (token.type === 'codespan' || token.type === 'code') {
+      if (token.type === 'code') {
         code = code + token.raw;
       }
       code = code + (joinCodeTokens((token as Tokens.Paragraph).tokens) || '');
@@ -112,16 +110,9 @@ function joinCodeTokens(tokens: Token[]) {
 function processGPTMessage(message: string) {
   const tokens = marked.lexer(message);
   const code = joinCodeTokens(tokens);
-  console.log(tokens);
 
   if (code) {
-    const selection = getSelection();
-
-    if (selection === '' || !selection) {
-      replaceFileText(code.substring(code.indexOf('\n') + 1));
-    } else {
-      replaceSelection(code.substring(code.indexOf('\n') + 1));
-    }
+    replaceFileText(code.substring(code.indexOf('\n') + 1));
   }
 
   return message;
@@ -169,16 +160,16 @@ async function gpt(
   openai: OpenAI,
   message: string,
   lastMessages: any[],
-  systemMessage: string,
+  systemMessages: string[],
 ) {
   try {
     const completion = await openai.chat.completions.create({
       messages: [
         ...lastMessages,
-        {
+        ...systemMessages.map((message) => ({
           role: 'system',
-          content: systemMessage,
-        },
+          content: message,
+        })),
         {
           role: 'user',
           content: message,
