@@ -1,5 +1,5 @@
 import { log } from 'console';
-import { marked } from 'marked';
+import { Token, Tokens, TokensList, marked } from 'marked';
 import OpenAI from 'openai';
 import { APIError } from 'openai/error.mjs';
 import * as vscode from 'vscode';
@@ -12,7 +12,6 @@ let messages: any[] = [
 ];
 
 let gptTyping: boolean = false;
-const textEditor = vscode.window.activeTextEditor;
 
 export function activate(context: vscode.ExtensionContext) {
   const openai = new OpenAI({
@@ -27,6 +26,7 @@ export function activate(context: vscode.ExtensionContext) {
       switch (data.type) {
         case 'submitMessage': {
           const userMessage = processUserMessage(data.value || '');
+
           if (!userMessage) {
             break;
           }
@@ -34,17 +34,21 @@ export function activate(context: vscode.ExtensionContext) {
           gptTyping = true;
           provider.setMessages(messages);
           const gptMessage = processGPTMessage(
-            (await gpt(userMessage, messages, openai)) || '',
+            (await gpt(
+              openai,
+              userMessage,
+              messages,
+              `current file:\n${getCurrentFileText()} \n\nuse this code as a reference and change if the user wants`,
+            )) || '',
           );
-          
-          if (!userMessage) {
+          gptTyping = false;
+          if (!gptMessage) {
             break;
           }
           messages.push({
             role: 'assistant',
             content: gptMessage,
           });
-          gptTyping = false;
           provider.setMessages(messages);
           context.workspaceState.update('messages', JSON.stringify(messages));
           break;
@@ -89,21 +93,42 @@ function processUserMessage(message: string) {
   return resMessage;
 }
 
-function processGPTMessage(message: string) {
-  const re = /```[a-z][\s\S]*\n?```/g;
+function joinCodeTokens(tokens: Token[]) {
+  if (!tokens) {
+    return;
+  }
+  let code = '';
+  tokens.forEach((token) => {
+    if (token.raw) {
+      if (token.type === 'codespan' || token.type === 'code') {
+        code = code + token.raw;
+      }
+      code = code + (joinCodeTokens((token as Tokens.Paragraph).tokens) || '');
+    }
+  });
+  return code.replaceAll('```', '');
+}
 
-  let code = re.exec(message)?.reduce((value: string, acc: string) => {
-    return (acc + value).replaceAll('```', '');
-  }, '');
+function processGPTMessage(message: string) {
+  const tokens = marked.lexer(message);
+  const code = joinCodeTokens(tokens);
+  console.log(tokens);
 
   if (code) {
-    replaceSelection(code.substring(code.indexOf('\n') + 1));
+    const selection = getSelection();
+
+    if (selection === '' || !selection) {
+      replaceFileText(code.substring(code.indexOf('\n') + 1));
+    } else {
+      replaceSelection(code.substring(code.indexOf('\n') + 1));
+    }
   }
 
   return message;
 }
 
 function replaceSelection(text: string) {
+  const textEditor = vscode.window.activeTextEditor;
   if (textEditor) {
     textEditor.edit(function (editBuilder: vscode.TextEditorEdit) {
       editBuilder.replace(textEditor.selection, text);
@@ -111,7 +136,19 @@ function replaceSelection(text: string) {
   }
 }
 
+function replaceFileText(text: string) {
+  const textEditor = vscode.window.activeTextEditor;
+  if (textEditor) {
+    textEditor.edit((editBuilder) => {
+      const document = textEditor.document;
+      const entireRange = new vscode.Range(0, 0, document.lineCount, 0);
+      editBuilder.replace(entireRange, text);
+    });
+  }
+}
+
 function getSelection() {
+  const textEditor = vscode.window.activeTextEditor;
   if (textEditor) {
     return textEditor.document.getText(
       new vscode.Range(textEditor.selection.start, textEditor.selection.end),
@@ -120,11 +157,28 @@ function getSelection() {
   return '';
 }
 
-async function gpt(message: string, lastMessages: any[], openai: OpenAI) {
+function getCurrentFileText() {
+  const textEditor = vscode.window.activeTextEditor;
+  if (textEditor) {
+    return textEditor.document.getText();
+  }
+  return '';
+}
+
+async function gpt(
+  openai: OpenAI,
+  message: string,
+  lastMessages: any[],
+  systemMessage: string,
+) {
   try {
     const completion = await openai.chat.completions.create({
       messages: [
         ...lastMessages,
+        {
+          role: 'system',
+          content: systemMessage,
+        },
         {
           role: 'user',
           content: message,
