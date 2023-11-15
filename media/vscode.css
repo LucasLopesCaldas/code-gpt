@@ -91,6 +91,7 @@ textarea::placeholder {
 }
 
 code {
+	display:inline-block;
 	color: var(--vscode-button-foreground);
 	background-color: var(--vscode-button-background);
 }

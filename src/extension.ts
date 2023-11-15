@@ -9,10 +9,6 @@ let messages: any[] = [
     role: 'system',
     content: 'You are a vscode assistent',
   },
-  {
-    role: 'system',
-    content: 'If the user tells you to modify the current file, you rewrite the current file with the changes',
-  },
 ];
 
 let gptTyping: boolean = false;
@@ -40,7 +36,9 @@ export function activate(context: vscode.ExtensionContext) {
           const gptMessage = processGPTMessage(
             (await gpt(openai, userMessage, messages, [
               `current file:\n${getCurrentFileText()} \n\nuse this code as a reference and change if the user wants`,
-              `selected part: ${getSelection()}`,
+              `selected part: ${getSelection() || 'user did not give'}`,
+              `only give to user the selected part modified if the user wants`,
+              `if user gives the selected part do not give the entire code to him`,
             ])) || '',
           );
           gptTyping = false;
@@ -88,7 +86,11 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 function processUserMessage(message: string) {
-  return message;
+  let selectedText = getSelection();
+
+  let resMessage = message.replaceAll('!sel', selectedText);
+
+  return resMessage;
 }
 
 function joinCodeTokens(tokens: Token[]) {
@@ -110,9 +112,16 @@ function joinCodeTokens(tokens: Token[]) {
 function processGPTMessage(message: string) {
   const tokens = marked.lexer(message);
   const code = joinCodeTokens(tokens);
+  console.log(tokens);
 
   if (code) {
-    replaceFileText(code.substring(code.indexOf('\n') + 1));
+    const selection = getSelection();
+
+    if (selection === '' || !selection) {
+      replaceFileText(code.substring(code.indexOf('\n') + 1));
+    } else {
+      replaceSelection(code.substring(code.indexOf('\n') + 1));
+    }
   }
 
   return message;
